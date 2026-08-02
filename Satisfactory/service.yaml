@@ -11,13 +11,13 @@ spec:
   selector:
     app: satisfactory-server
   # Satisfactory 1.0 uses the SAME port number for the reliable (TCP) and
-  # unreliable (UDP) channels, so both entries share nodePort 30018. Kubernetes
+  # unreliable (UDP) channels, so both entries share nodePort 30000. Kubernetes
   # allows this because nodePort uniqueness is per (port, protocol).
   #
   # The container is told to listen on the nodePort numbers directly
   # (SERVERGAMEPORT / SERVERMESSAGINGPORT in the StatefulSet) so there is no
   # port translation. That matters: the server advertises its own game port to
-  # clients, and if it advertised 7777 while the outside world had to use 30018,
+  # clients, and if it advertised 7777 while the outside world had to use 30000,
   # clients would be sent to a port that isn't published.
   ports:
     - name: game-tcp
