@@ -1,0 +1,121 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: satisfactory-server
+  namespace: default
+  labels:
+    app: satisfactory-server
+spec:
+  serviceName: satisfactory-server
+  # The dedicated server is single-instance; scaling up would mean several
+  # servers fighting over separate saves, not one clustered world.
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  # Keep the world if the StatefulSet is deleted or scaled to zero.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: satisfactory-server
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: satisfactory-server
+    spec:
+      # Give the server room to flush a save before the container is killed.
+      terminationGracePeriodSeconds: 60
+      # No pod securityContext on purpose. init.sh must start as root: it runs
+      # `chown -R $PUID:$PGID /config` (local-path hands out root-owned dirs)
+      # and then `exec gosu steam run.sh`. Forcing runAsUser here makes the
+      # entrypoint abort.
+      containers:
+        - name: satisfactory-server
+          image: wolveix/satisfactory-server:latest
+          imagePullPolicy: Always
+          ports:
+            - name: game-tcp
+              containerPort: 30000
+              protocol: TCP
+            - name: game-udp
+              containerPort: 30000
+              protocol: UDP
+            - name: messaging
+              containerPort: 30001
+              protocol: TCP
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            # Listen directly on the NodePort numbers so the port the server
+            # advertises to clients is the port they can actually reach.
+            - name: SERVERGAMEPORT
+              value: "30000"
+            - name: SERVERMESSAGINGPORT
+              value: "30001"
+            - name: MAXPLAYERS
+              value: "6"
+            - name: MAXTICKRATE
+              value: "30"
+            - name: AUTOSAVENUM
+              value: "5"
+            - name: TIMEOUT
+              value: "30"
+            - name: SERVERSTREAMING
+              value: "true"
+            - name: DISABLESEASONALEVENTS
+              value: "false"
+            - name: SKIPUPDATE
+              value: "false"
+            - name: DEBUG
+              value: "false"
+            - name: LOG
+              value: "false"
+            # spliceprd is bare metal, so the CPU model check should pass. Set
+            # to "true" if the entrypoint refuses to start over it.
+            - name: VMOVERRIDE
+              value: "false"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              cpu: "8"
+              memory: 24Gi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          # First boot pulls ~8GB of game files through SteamCMD, so the startup
+          # probe allows up to 60 minutes before the pod is declared failed.
+          startupProbe:
+            tcpSocket:
+              port: game-tcp
+            periodSeconds: 30
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: game-tcp
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: game-tcp
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+  volumeClaimTemplates:
+    # One volume: the image keeps gamefiles, saved, backups and logs under
+    # /config. local-path is the cluster default StorageClass.
+    - metadata:
+        name: config
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
